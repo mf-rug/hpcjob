@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hpcjob"
+version = "0.1.0"
+description = "Submit SLURM jobs to and pull results from remote HPC clusters via SSH — multi-cluster, one tool."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["pyyaml"]
+
+[project.scripts]
+hpcjob = "hpcjob.cli:main"
+# Back-compat shims — these supersede the standalone hpc-submit / rsyncer tools.
+hpc-submit = "hpcjob.shims:hpc_submit_main"
+rsyncer = "hpcjob.shims:rsyncer_main"
+
+[tool.setuptools]
+packages = ["hpcjob"]
