@@ -52,6 +52,11 @@ class Cluster:
     ssh_stderr_filter: str | None = None
     user: str | None = None
     notes_file: str | None = None
+    # `preflight` only. Site-specific by nature, so both are declared here
+    # rather than known by the code: the URL is fetched and its text reported,
+    # and each quota command's output is passed through verbatim.
+    status_url: str | None = None
+    quota_commands: list[str] = field(default_factory=list)
 
     # ---- {user} substitution -------------------------------------------------
     _resolved_user: str | None = field(default=None, repr=False)
@@ -124,6 +129,8 @@ def _cluster_from_raw(name: str, block: dict) -> Cluster:
                            if block.get("ssh_stderr_filter") else None),
         user=(str(block["user"]) if block.get("user") else None),
         notes_file=(str(block["notes_file"]) if block.get("notes_file") else None),
+        status_url=(str(block["status_url"]) if block.get("status_url") else None),
+        quota_commands=[str(c) for c in block.get("quota_commands", [])],
     )
 
 

@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .config import interactive_init, list_clusters, resolve_cluster
+from .config import interactive_init, list_clusters, load_registry, resolve_cluster
 from .ssh import test_remote_path, test_ssh_connection
 
 
@@ -84,6 +84,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("job_id", type=int, nargs="+")
     _add_cluster_flag(p)
 
+    # preflight
+    p = sub.add_parser("preflight",
+                       help="Is the cluster up, am I in budget, which GPUs are free?")
+    p.add_argument("--all", action="store_true", dest="all_clusters",
+                   help="Report every configured cluster.")
+    p.add_argument("--gpu", default=None, metavar="TYPE",
+                   help="GPU you intend to request (e.g. a100:1); adds a routing hint "
+                        "when none are free.")
+    p.add_argument("--json", action="store_true", dest="as_json",
+                   help="Machine-readable output, for tools that route on it.")
+    p.add_argument("--quota", action="store_true",
+                   help="Also run the cluster's quota/allowance commands. Off by "
+                        "default: their output is site-defined and often contains "
+                        "personal details (names, emails, group members), which "
+                        "should not be pulled in on every routine check.")
+    _add_cluster_flag(p)
+
     # clusters
     sub.add_parser("clusters", help="List configured clusters.")
 
@@ -113,6 +130,41 @@ def cmd_clusters() -> None:
         if c.notes_file:
             print(f"      notes:        {c.notes_file}")
         print()
+
+
+def cmd_preflight(args) -> int:
+    """Report submission readiness for one cluster or all of them."""
+    import json as _json
+
+    from .preflight import gather
+    from .preflight_report import render, render_routing_hint
+
+    if args.all_clusters:
+        names = sorted(load_registry()["clusters"])
+        clusters = [resolve_cluster(n) for n in names]
+    else:
+        clusters = [resolve_cluster(args.cluster)]
+
+    reports = []
+    for cluster in clusters:
+        if not args.quota:
+            cluster.quota_commands = []
+        reports.append(gather(cluster))
+
+    if args.as_json:
+        print(_json.dumps(reports if args.all_clusters else reports[0], indent=2))
+    else:
+        for i, report in enumerate(reports):
+            if i:
+                print()
+            print(render(report, show_quota=args.quota))
+            if args.gpu and report["reachable"]:
+                hint = render_routing_hint(report, args.gpu)
+                if hint:
+                    print(hint)
+
+    # Non-zero when nothing is usable, so a script can gate a submit on it.
+    return 0 if any(r["reachable"] for r in reports) else 1
 
 
 def cmd_check(cluster_name: str | None) -> int:
@@ -161,6 +213,8 @@ def main() -> None:
             return
         if args.command == "check":
             sys.exit(cmd_check(args.cluster))
+        if args.command == "preflight":
+            sys.exit(cmd_preflight(args))
 
         if args.command == "submit":
             if not args.job_script.exists():
