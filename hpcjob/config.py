@@ -18,9 +18,20 @@ Schema
         max_depth: 5
         ssh_stderr_filter: null         # drop stderr lines containing this substring
         user: null                      # optional; else resolved via `ssh host whoami`
+        # `preflight` only, both optional:
+        status_url: https://status.example.org/   # fetched when the cluster is
+                                        # unreachable, to distinguish "down for
+                                        # maintenance" from "your key is broken"
+        quota_commands: [myquota]       # run with `preflight --quota`; output is
+                                        # shown verbatim, never parsed
 
 `{user}` in any path is replaced with the remote username (the `user:` field if
 set, otherwise the result of `ssh <host> whoami`, resolved once and cached).
+
+`status_url` and `quota_commands` are the only site-specific knowledge in the
+tool, and they live here rather than in code precisely because they differ per
+site: quota output has no common format across clusters, so it is passed
+through for a human (or an agent) to read instead of being parsed.
 """
 
 from __future__ import annotations

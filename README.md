@@ -40,6 +40,13 @@ clusters:
     ssh_stderr_filter: null       # drop stderr lines containing this substring
     user: null                    # optional; else resolved via `ssh host whoami`
     notes_file: null              # optional per-cluster operational notes (*.md)
+
+    # used by `hpcjob preflight`, both optional:
+    status_url: https://status.example.org/   # fetched when the cluster is
+                                  # unreachable, so a maintenance window is not
+                                  # mistaken for a broken ssh key
+    quota_commands: [myquota]     # e.g. [myquota, accinfo] or [hbquota]; run
+                                  # with `preflight --quota`, output shown verbatim
 ```
 
 `{user}` in any path is replaced with the remote username. Bootstrap the file
@@ -62,5 +69,37 @@ hpcjob check   --cluster snellius           # test SSH + remote path
 
 hpcjob submit myjob/job.sh --cluster snellius   # target another cluster
 ```
+
+### `preflight` — should I submit here at all?
+
+```bash
+hpcjob preflight --all               # every cluster: up? which GPUs are free?
+hpcjob preflight --gpu a100:1        # + a note if that GPU type is saturated
+hpcjob preflight --quota             # + the site's quota/allowance output
+hpcjob preflight --json              # machine-readable, for tools that route on it
+```
+
+One ssh round-trip reporting reachability, free GPUs per partition, queue
+pressure and fairshare standing. GPU totals are deduplicated by node, since a
+node usually serves several partitions and summing partition rows overstates
+what is free.
+
+When a cluster is unreachable it fetches `status_url` and reports what the page
+says. This is the point of the subcommand: **a cluster in maintenance refuses
+ssh in ways that look like an authentication failure**, so the obvious response
+is to start debugging keys instead of reading the status page.
+
+`--quota` is opt-in rather than default. Quota output is site-defined and often
+contains personal details (names, emails, group members), which have no place in
+a routine availability check — and skipping it makes the call several times
+faster.
+
+It reports rather than recommends a substitute GPU: Slurm exposes GPU *names*,
+not their VRAM, so this layer cannot tell an upgrade from a downgrade. Callers
+that hold a capability ordering (a job generator's GPU tiers) can consume
+`--json` and decide safely.
+
+Exit status is non-zero when no cluster is reachable, so a script can gate a
+submit on it.
 
 Without `--cluster`, the registry's `default_cluster` is used.
