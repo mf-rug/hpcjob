@@ -47,6 +47,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Override remote dir name (default: #SBATCH --job-name).")
     p.add_argument("--overwrite", action="store_true",
                    help="Overwrite the remote directory if it exists (no prompt).")
+    p.add_argument("--jobs-dir", default=None, metavar="PATH", dest="jobs_dir",
+                   help="Remote base dir for this job, overriding the cluster's "
+                        "configured jobs_dir (e.g. .../rfd3_jobs).")
     _add_cluster_flag(p)
 
     # pull
@@ -168,7 +171,8 @@ def main() -> None:
                 if not f.exists():
                     parser.error(f"file not found: {f}")
             cluster = resolve_cluster(args.cluster)
-            submit(cluster, args.job_script, args.jobname, args.files, args.overwrite)
+            submit(cluster, args.job_script, args.jobname, args.files, args.overwrite,
+                   jobs_dir=getattr(args, "jobs_dir", None))
             return
 
         if args.command == "pull":

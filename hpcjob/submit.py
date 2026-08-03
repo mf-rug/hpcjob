@@ -132,9 +132,13 @@ def check_output_dir(job_script: Path) -> str | None:
 
 
 def submit(cluster: Cluster, job_script: Path, name: str | None,
-           extra_files: list[Path], overwrite: bool = False) -> None:
+           extra_files: list[Path], overwrite: bool = False,
+           jobs_dir: str | None = None) -> None:
     host = cluster.host
-    base = cluster.jobs_dir_x
+    # `jobs_dir` lets a tool park its jobs somewhere other than the cluster's
+    # configured default (e.g. rfd3_jobs/ next to boltz_jobs/) without needing
+    # a duplicate cluster entry. `pull` still finds them via search_paths.
+    base = jobs_dir.rstrip("/") if jobs_dir else cluster.jobs_dir_x
 
     if name is None:
         name = parse_sbatch_directive(job_script, "job-name")
