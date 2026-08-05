@@ -24,7 +24,9 @@ Schema
                                         # maintenance" from "your key is broken"
         quota_commands: [myquota]       # run with `preflight --quota`; output is
                                         # shown verbatim, never parsed
-        ignore_partitions: [private*]   # partitions you cannot submit to
+        ignore_partitions: [private*]   # optional manual override; partitions
+                                        # barred by AllowAccounts/DenyAccounts
+                                        # are dropped automatically
 
 `{user}` in any path is replaced with the remote username (the `user:` field if
 set, otherwise the result of `ssh <host> whoami`, resolved once and cached).

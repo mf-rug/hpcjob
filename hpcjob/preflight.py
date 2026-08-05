@@ -134,6 +134,7 @@ _USABLE = ("idle", "mixed", "alloc", "completing", "reserved")
 def parse_nodes(
     scontrol_out: str,
     ignore_partitions: list[str] | None = None,
+    allowed_partitions: set[str] | None = None,
 ) -> tuple[dict[tuple[str, str], GpuAvailability], dict[str, dict[str, int]]]:
     """Capacity from `scontrol -o show node`.
 
@@ -151,6 +152,7 @@ def parse_nodes(
     import fnmatch
 
     ignore = list(ignore_partitions or [])
+    allowed = allowed_partitions
     avail: dict[tuple[str, str], GpuAvailability] = {}
     seen_nodes: set[str] = set()
     totals: dict[str, dict[str, int]] = {}
@@ -167,6 +169,8 @@ def parse_nodes(
         # reserved partition sitting fully idle reads as the obvious place to
         # send the job. Which ones those are is a site fact, so it comes from
         # config rather than from probing associations.
+        if allowed is not None:
+            partitions = [p for p in partitions if p in allowed]
         if ignore:
             partitions = [p for p in partitions
                           if not any(fnmatch.fnmatch(p, pat) for pat in ignore)]
@@ -199,6 +203,40 @@ def parse_nodes(
     for agg in totals.values():
         agg["free"] = max(agg["total"] - agg["used"], 0)
     return avail, totals
+
+
+def parse_allowed_partitions(
+    scontrol_part_out: str, accounts: set[str]
+) -> set[str] | None:
+    """Partitions this account may actually submit to.
+
+    `AllowAccounts` / `DenyAccounts` are standard Slurm, so this is derived
+    rather than configured -- group-owned partitions filter themselves out on
+    any cluster. That matters because a reserved partition is typically *idle*,
+    so it looks like the best place to send a job while rejecting it outright.
+
+    Returns None when nothing could be determined, meaning "do not filter".
+    """
+    allowed: set[str] = set()
+    saw_any = False
+    for line in scontrol_part_out.splitlines():
+        if "PartitionName=" not in line:
+            continue
+        fields = dict(re.findall(r"(\w+)=([^\s]+)", line))
+        name = fields.get("PartitionName", "")
+        if not name:
+            continue
+        saw_any = True
+        allow = fields.get("AllowAccounts", "ALL")
+        deny = fields.get("DenyAccounts", "")
+        allow_set = {a.strip() for a in allow.split(",") if a.strip()}
+        deny_set = {d.strip() for d in deny.split(",") if d.strip()}
+        if accounts & deny_set:
+            continue
+        if allow.upper() != "ALL" and not (accounts & allow_set):
+            continue
+        allowed.add(name)
+    return allowed if (saw_any and accounts) else None
 
 
 def parse_pending(squeue_out: str) -> dict[str, int]:
@@ -240,6 +278,9 @@ def _remote_script(quota_commands: list[str]) -> str:
         f'echo "{MARK}pending"; squeue -h -t PD -o "%P" 2>/dev/null',
         f'echo "{MARK}fairshare"; sshare -U -P -n '
         f'-o Account,User,RawUsage,NormShares,EffectvUsage,FairShare 2>/dev/null',
+        f'echo "{MARK}partitions"; scontrol -o show partition 2>/dev/null',
+        f'echo "{MARK}accounts"; sacctmgr -nP show assoc user=$(whoami) format=Account '
+        f'2>/dev/null',
     ]
     if quota_commands:
         # Quota tools are written for humans at a terminal and several size their
@@ -314,8 +355,13 @@ def gather(cluster: Cluster, *, timeout: int = 60) -> dict[str, Any]:
     if proc is not None and proc.returncode == 0:
         result["reachable"] = True
         sections = _split_sections(proc.stdout)
+        accounts = {a.strip() for a in sections.get("accounts", "").split()
+                    if a.strip()}
+        allowed = parse_allowed_partitions(sections.get("partitions", ""), accounts)
+        result["accounts"] = sorted(accounts)
         nodes, totals = parse_nodes(sections.get("nodes", ""),
-                                    cluster.ignore_partitions)
+                                    cluster.ignore_partitions,
+                                    allowed)
         pending = parse_pending(sections.get("pending", ""))
         for (part, _gpu), entry in nodes.items():
             entry.pending = pending.get(part, 0)
