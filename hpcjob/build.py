@@ -45,7 +45,10 @@ def revision() -> str | None:
     sha = _git(["rev-parse", "--short", "HEAD"], root)
     if not sha:
         return None
-    dirty = _git(["status", "--porcelain"], root)
+    # Tracked modifications only. An untracked stray file in the checkout says
+    # nothing about the code being run, and a marker that fires on it teaches
+    # you to ignore the marker.
+    dirty = _git(["status", "--porcelain", "--untracked-files=no"], root)
     return f"{sha}-dirty" if dirty else sha
 
 
