@@ -24,6 +24,7 @@ Schema
                                         # maintenance" from "your key is broken"
         quota_commands: [myquota]       # run with `preflight --quota`; output is
                                         # shown verbatim, never parsed
+        ignore_partitions: [private*]   # partitions you cannot submit to
 
 `{user}` in any path is replaced with the remote username (the `user:` field if
 set, otherwise the result of `ssh <host> whoami`, resolved once and cached).
@@ -68,6 +69,9 @@ class Cluster:
     # and each quota command's output is passed through verbatim.
     status_url: str | None = None
     quota_commands: list[str] = field(default_factory=list)
+    # Partitions you cannot submit to (glob patterns). Reserved ones sit
+    # idle and would otherwise read as the best place to send a job.
+    ignore_partitions: list[str] = field(default_factory=list)
 
     # ---- {user} substitution -------------------------------------------------
     _resolved_user: str | None = field(default=None, repr=False)
@@ -142,6 +146,7 @@ def _cluster_from_raw(name: str, block: dict) -> Cluster:
         notes_file=(str(block["notes_file"]) if block.get("notes_file") else None),
         status_url=(str(block["status_url"]) if block.get("status_url") else None),
         quota_commands=[str(c) for c in block.get("quota_commands", [])],
+        ignore_partitions=[str(p) for p in block.get("ignore_partitions", [])],
     )
 
 

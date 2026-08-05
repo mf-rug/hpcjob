@@ -133,6 +133,7 @@ _USABLE = ("idle", "mixed", "alloc", "completing", "reserved")
 
 def parse_nodes(
     scontrol_out: str,
+    ignore_partitions: list[str] | None = None,
 ) -> tuple[dict[tuple[str, str], GpuAvailability], dict[str, dict[str, int]]]:
     """Capacity from `scontrol -o show node`.
 
@@ -147,6 +148,9 @@ def parse_nodes(
     Nodes that are down/drained/failed are excluded: a GPU on a drained node is
     not capacity, and counting it would make a full partition look available.
     """
+    import fnmatch
+
+    ignore = list(ignore_partitions or [])
     avail: dict[tuple[str, str], GpuAvailability] = {}
     seen_nodes: set[str] = set()
     totals: dict[str, dict[str, int]] = {}
@@ -159,6 +163,15 @@ def parse_nodes(
         if not any(s in state for s in _USABLE):
             continue
         partitions = [p for p in fields.get("Partitions", "").split(",") if p]
+        # Partitions you cannot submit to are worse than useless here: a
+        # reserved partition sitting fully idle reads as the obvious place to
+        # send the job. Which ones those are is a site fact, so it comes from
+        # config rather than from probing associations.
+        if ignore:
+            partitions = [p for p in partitions
+                          if not any(fnmatch.fnmatch(p, pat) for pat in ignore)]
+        if not partitions:
+            continue
         cfg = _gres_counts(fields.get("Gres", "") or fields.get("CfgTRES", ""))
         used_all = _gres_counts(fields.get("AllocTRES", ""))
         if not cfg:
@@ -228,11 +241,29 @@ def _remote_script(quota_commands: list[str]) -> str:
         f'echo "{MARK}fairshare"; sshare -U -P -n '
         f'-o Account,User,RawUsage,NormShares,EffectvUsage,FairShare 2>/dev/null',
     ]
+    if quota_commands:
+        # Quota tools are written for humans at a terminal and several size their
+        # output with `tput cols`, which exits non-zero when TERM is unset -- as
+        # it is over a non-interactive ssh. Habrok's `hbquota` crashes outright
+        # without this, dumping a Python traceback where the quota should be.
+        parts.append("export TERM=${TERM:-xterm} COLUMNS=${COLUMNS:-100}")
     for cmd in quota_commands:
         # Verbatim: the point is not to parse site-specific quota output.
         safe = cmd.replace('"', '\\"')
         parts.append(f'echo "{MARK}quota:{cmd}"; {safe} 2>&1')
     return "; ".join(parts)
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove colour/bold escapes from passed-through output.
+
+    Not parsing -- the text is unchanged. Those tools colour their output for a
+    terminal, and the escapes are noise in a log or an agent's context.
+    """
+    return _ANSI.sub("", text)
 
 
 def _split_sections(out: str) -> dict[str, str]:
@@ -283,7 +314,8 @@ def gather(cluster: Cluster, *, timeout: int = 60) -> dict[str, Any]:
     if proc is not None and proc.returncode == 0:
         result["reachable"] = True
         sections = _split_sections(proc.stdout)
-        nodes, totals = parse_nodes(sections.get("nodes", ""))
+        nodes, totals = parse_nodes(sections.get("nodes", ""),
+                                    cluster.ignore_partitions)
         pending = parse_pending(sections.get("pending", ""))
         for (part, _gpu), entry in nodes.items():
             entry.pending = pending.get(part, 0)
@@ -292,7 +324,7 @@ def gather(cluster: Cluster, *, timeout: int = 60) -> dict[str, Any]:
         result["gpu_totals"] = totals
         result["pending"] = pending
         result["fairshare"] = parse_fairshare(sections.get("fairshare", ""))
-        result["quota"] = {k.split(":", 1)[1]: v
+        result["quota"] = {k.split(":", 1)[1]: _strip_ansi(v)
                            for k, v in sections.items() if k.startswith("quota:")}
     elif proc is not None:
         result["ssh_error"] = filter_stderr(
