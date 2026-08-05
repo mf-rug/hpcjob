@@ -7,6 +7,7 @@ Subcommands:
   status    query a job's state
   cancel    scancel one or more jobs
   clusters  list configured clusters
+  doctor    how this tool is installed, and where it reads config from
   check     test SSH + remote path for a cluster
   init      create / migrate the cluster registry
 
@@ -35,7 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="hpcjob",
         description="Submit SLURM jobs to and pull results from remote HPC clusters via SSH.",
     )
-    parser.add_argument("--version", action="version", version=f"hpcjob {__version__}")
+    from .build import version_string
+    parser.add_argument("--version", action="version",
+                        version=f"hpcjob {version_string(__version__)}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
     # submit
@@ -100,6 +103,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "personal details (names, emails, group members), which "
                         "should not be pulled in on every routine check.")
     _add_cluster_flag(p)
+
+    # doctor
+    sub.add_parser("doctor",
+                   help="How this tool is installed, and where it reads config from.")
 
     # clusters
     sub.add_parser("clusters", help="List configured clusters.")
@@ -207,6 +214,10 @@ def main() -> None:
 
         if args.command == "init":
             interactive_init(migrate=args.migrate)
+            return
+        if args.command == "doctor":
+            from .build import report
+            print(report(__version__))
             return
         if args.command == "clusters":
             cmd_clusters()
